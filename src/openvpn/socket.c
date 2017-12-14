@@ -52,6 +52,9 @@ const int proto_overhead[] = { /* indexed by PROTO_x */
     IPv4_UDP_HEADER_SIZE, /* IPv4 */
     IPv4_TCP_HEADER_SIZE,
     IPv4_TCP_HEADER_SIZE,
+#ifdef ENABLE_PLUGIN
+    0,                    /* Doesn't really make any sense */
+#endif
     IPv6_UDP_HEADER_SIZE, /* IPv6 */
     IPv6_TCP_HEADER_SIZE,
     IPv6_TCP_HEADER_SIZE,
