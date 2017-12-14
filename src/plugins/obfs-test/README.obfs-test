@@ -1,0 +1,21 @@
+This module is a runnable early sketch / proof of concept for
+implementing obfuscation support for OpenVPN via a new "socket
+intercept" plugin type.
+
+You can include the obfs-test plugin in the build by specifying
+--enable-plugin-obfs-test at configure time.
+
+Invoking obfs-test requires loading it via an appropriate plugin line
+in the configuration file, and then specifying 'proto indirect' rather
+than any other protocol. The underlying main loop is the same one used
+in UDP mode, but incoming and outgoing packets will be passed through
+this plugin using a very basic form of content obfuscation, and the
+bind port will also be altered to demonstrate that the plugin has
+control over socket creation (which will be extended to a more
+sophisticated version later for supporting the desired range of
+transports).
+
+The new APIs used here are not final and do not cover every desired
+use case or have completely clear semantics, but the most essential
+ways in which the plugin needs to be able to interact with the core
+event loop and socket code are demonstrably present.
