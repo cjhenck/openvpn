@@ -171,6 +171,7 @@ obfs_test_update_event(openvpn_vsocket_handle_t handle, void *arg, unsigned rwfl
 static unsigned
 obfs_test_pump(openvpn_vsocket_handle_t handle)
 {
+    warnx("obfs-test: pump -> %d", ((struct obfs_test_socket *) handle)->last_rwflags);
     return ((struct obfs_test_socket *) handle)->last_rwflags;
 }
 
