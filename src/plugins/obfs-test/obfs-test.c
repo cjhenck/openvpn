@@ -51,6 +51,15 @@ openvpn_plugin_close_v1(openvpn_plugin_handle_t handle)
     free_context((struct obfs_test_context *) handle);
 }
 
+OPENVPN_EXPORT int
+openvpn_plugin_func_v3(int version,
+                       struct openvpn_plugin_args_func_in const *arguments,
+                       struct openvpn_plugin_args_func_return *retptr)
+{
+    /* We don't ask for any bits that use this interface. */
+    return OPENVPN_PLUGIN_FUNC_ERROR;
+}
+
 struct obfs_test_socket
 {
     struct openvpn_vsocket_handle handle;
