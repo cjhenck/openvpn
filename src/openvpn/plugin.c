@@ -118,6 +118,9 @@ plugin_type_name(const int type)
         case OPENVPN_PLUGIN_ROUTE_PREDOWN:
             return "PLUGIN_ROUTE_PREDOWN";
 
+        case OPENVPN_PLUGIN_SOCKET_INTERCEPT:
+            return "PLUGIN_SOCKET_INTERCEPT";
+
         default:
             return "PLUGIN_???";
     }
