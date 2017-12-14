@@ -3954,6 +3954,7 @@ encapsulated_event_set_set_event(openvpn_vsocket_event_set_handle_t handle,
                                  void *arg)
 {
     struct event_set *es = ((struct encapsulated_event_set *) handle)->real;
+    /* FIXME: see obfs_test_request_event in obfs-test.c. */
     if (rwflags == 0)
         event_del(es, ev);
     else

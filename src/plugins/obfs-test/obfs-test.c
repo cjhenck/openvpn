@@ -146,8 +146,11 @@ static void
 obfs_test_request_event(openvpn_vsocket_handle_t handle,
                         openvpn_vsocket_event_set_handle_t event_set, unsigned rwflags)
 {
-    event_set->vtab->set_event(event_set, ((struct obfs_test_socket *) handle)->fd,
-                               rwflags, handle);
+    /* FIXME: this assumes one-shot events. The fast-mode/non-fast-mode distinction in
+       the core event loop is awkward here. */
+    if (rwflags)
+        event_set->vtab->set_event(event_set, ((struct obfs_test_socket *) handle)->fd,
+                                   rwflags, handle);
 }
 
 static bool
