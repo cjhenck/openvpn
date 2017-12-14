@@ -45,6 +45,12 @@ err:
     return OPENVPN_PLUGIN_FUNC_ERROR;
 }
 
+OPENVPN_EXPORT void
+openvpn_plugin_close_v1(openvpn_plugin_handle_t handle)
+{
+    free_context((struct obfs_test_context *) handle);
+}
+
 struct obfs_test_socket
 {
     struct openvpn_vsocket_handle handle;
