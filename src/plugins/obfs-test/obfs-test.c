@@ -254,6 +254,7 @@ obfs_test_recvfrom(openvpn_vsocket_handle_t handle, void *buf, size_t len,
         munge_addr(addr, *addrlen);
     if (result > 0)
         result = unmunge_buf(buf, result);
+    warnx("obfs-test: recvfrom(%d) -> %d", (int)len, (int)result);
     return result;
 }
 
@@ -280,6 +281,7 @@ obfs_test_sendto(openvpn_vsocket_handle_t handle, const void *buf, size_t len,
        invariant of return value <= len. */
     if (result > len)
         result = len;
+    warnx("obfs-test: sendto(%d) -> %d", (int)len, (int)result);
     free(addr_rev);
     free(buf_munged);
     return result;
