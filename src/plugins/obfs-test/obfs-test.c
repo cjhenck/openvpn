@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <err.h>
 #include <errno.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include "openvpn-plugin.h"
@@ -129,6 +131,8 @@ obfs_test_bind(const struct sockaddr *addr, socklen_t len)
 
     sock->fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock->fd == -1)
+        goto error;
+    if (fcntl(sock->fd, F_SETFL, fcntl(sock->fd, F_GETFL) | O_NONBLOCK))
         goto error;
     
     if (bind(sock->fd, addr_rev, len))
@@ -270,6 +274,8 @@ obfs_test_sendto(openvpn_vsocket_handle_t handle, const void *buf, size_t len,
        invariant of return value <= len. */
     if (result > len)
         result = len;
+    free(addr_rev);
+    free(buf_munged);
     return result;
 
 error:
