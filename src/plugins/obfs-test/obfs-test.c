@@ -152,6 +152,7 @@ obfs_test_request_event(openvpn_vsocket_handle_t handle,
 {
     /* FIXME: this assumes one-shot events. The fast-mode/non-fast-mode distinction in
        the core event loop is awkward here. */
+    warnx("obfs-test: request-event: %d", rwflags);
     if (rwflags)
         event_set->vtab->set_event(event_set, ((struct obfs_test_socket *) handle)->fd,
                                    rwflags, handle);
@@ -160,6 +161,7 @@ obfs_test_request_event(openvpn_vsocket_handle_t handle,
 static bool
 obfs_test_update_event(openvpn_vsocket_handle_t handle, void *arg, unsigned rwflags)
 {
+    warnx("obfs-test: update-event: %p, %p, %d", handle, arg, rwflags);
     if (arg != handle)
         return false;
     ((struct obfs_test_socket *) handle)->last_rwflags = rwflags;
