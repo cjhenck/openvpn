@@ -3277,6 +3277,14 @@ proto_remote(int proto, bool remote)
         return "TCPv4_CLIENT";
     }
 
+    if (proto == PROTO_INDIRECT)
+    {
+        /* FIXME: what is actually appropriate here? If this is used
+           on the wire (as implied above), then we really want to know
+           the exact plugin in use. */
+        return "INDIRECT";
+    }
+
     ASSERT(0);
     return ""; /* Make the compiler happy */
 }
