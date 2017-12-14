@@ -199,6 +199,8 @@ unmunge_buf(char *buf, size_t len)
         len /= 2;
     }
 
+    return len;
+
 bad:
     /* TODO: this really isn't the best way to report this error */
     errno = EIO;
@@ -237,11 +239,10 @@ obfs_test_recvfrom(openvpn_vsocket_handle_t handle, void *buf, size_t len,
 {
     int fd = ((struct obfs_test_socket *) handle)->fd;
     ssize_t result = recvfrom(fd, buf, len, 0, addr, addrlen);
-    if (result >= 0)
-    {
+    if (*addrlen > 0)
         munge_addr(addr, *addrlen);
+    if (result > 0)
         result = unmunge_buf(buf, result);
-    }
     return result;
 }
 
