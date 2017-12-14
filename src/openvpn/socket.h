@@ -35,6 +35,10 @@
 #include "socks.h"
 #include "misc.h"
 
+#ifdef ENABLE_PLUGIN
+#include "openvpn-vsocket.h"
+#endif
+
 /*
  * OpenVPN's default port number as assigned by IANA.
  */
@@ -173,6 +177,11 @@ struct link_socket
     struct overlapped_io writes;
     struct rw_handle rw_handle;
     struct rw_handle listen_handle; /* For listening on TCP socket in server mode */
+#endif
+
+#ifdef ENABLE_PLUGIN
+    /* only valid when info.proto == PROTO_INDIRECT */
+    openvpn_vsocket_handle_t indirect;
 #endif
 
     /* used for printing status info only */
@@ -488,6 +497,9 @@ bool proto_is_udp(int proto);
 
 bool proto_is_tcp(int proto);
 
+#ifdef ENABLE_PLUGIN
+bool proto_is_indirect(int proto);
+#endif
 
 #if UNIX_SOCK_SUPPORT
 
@@ -560,6 +572,9 @@ enum proto_num {
     PROTO_TCP,
     PROTO_TCP_SERVER,
     PROTO_TCP_CLIENT,
+#ifdef ENABLE_PLUGIN
+    PROTO_INDIRECT,
+#endif
     PROTO_N
 };
 
@@ -1049,12 +1064,25 @@ int link_socket_read_udp_posix(struct link_socket *sock,
 
 #endif
 
+#ifdef ENABLE_PLUGIN
+
+int link_socket_read_indirect(struct link_socket *sock,
+                               struct buffer *buf,
+                               struct link_socket_actual *from);
+
+#endif  /* ENABLE_PLUGIN */
+
 /* read a TCP or UDP packet from link */
 static inline int
 link_socket_read(struct link_socket *sock,
                  struct buffer *buf,
                  struct link_socket_actual *from)
 {
+#ifdef ENABLE_PLUGIN
+    if (proto_is_indirect(sock->info.proto))
+        return link_socket_read_indirect(sock, buf, from);
+#endif
+
     if (proto_is_udp(sock->info.proto)) /* unified UDPv4 and UDPv6 */
     {
         int res;
@@ -1086,6 +1114,14 @@ link_socket_read(struct link_socket *sock,
 int link_socket_write_tcp(struct link_socket *sock,
                           struct buffer *buf,
                           struct link_socket_actual *to);
+
+#ifdef ENABLE_PLUGIN
+
+int link_socket_write_indirect(struct link_socket *sock,
+                               struct buffer *buf,
+                               struct link_socket_actual *from);
+
+#endif  /* ENABLE_PLUGIN */
 
 #ifdef _WIN32
 
@@ -1168,6 +1204,11 @@ link_socket_write(struct link_socket *sock,
                   struct buffer *buf,
                   struct link_socket_actual *to)
 {
+#ifdef ENABLE_PLUGIN
+    if (proto_is_indirect(sock->info.proto))
+        return link_socket_write_indirect(sock, buf, to);
+#endif
+
     if (proto_is_udp(sock->info.proto)) /* unified UDPv4 and UDPv6 */
     {
         return link_socket_write_udp(sock, buf, to);
@@ -1262,6 +1303,23 @@ socket_reset_listen_persistent(struct link_socket *s)
     reset_net_event_win32(&s->listen_handle, s->sd);
 #endif
 }
+
+#ifdef ENABLE_PLUGIN
+
+/* Mutates esr/esrlen to consume events. */
+unsigned socket_do_indirect_pump(openvpn_vsocket_handle_t vsocket,
+                                 struct event_set_return *esr, int *esrlen);
+
+static inline unsigned
+socket_indirect_pump(struct link_socket *s, struct event_set_return *esr, int *esrlen)
+{
+    if (s->indirect)
+        return socket_do_indirect_pump(s->indirect, esr, esrlen);
+    else
+        return 0;
+}
+
+#endif  /* ENABLE_PLUGIN */
 
 const char *socket_stat(const struct link_socket *s, unsigned int rwflags, struct gc_arena *gc);
 

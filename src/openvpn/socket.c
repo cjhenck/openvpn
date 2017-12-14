@@ -41,6 +41,10 @@
 #include "openvpn.h"
 #include "forward.h"
 
+#ifdef ENABLE_PLUGIN
+#include "openvpn-vsocket.h"
+#endif
+
 #include "memdbg.h"
 
 const int proto_overhead[] = { /* indexed by PROTO_x */
@@ -982,9 +986,79 @@ bind_local(struct link_socket *sock, const sa_family_t ai_family)
     }
 }
 
+#ifdef ENABLE_PLUGIN
+static struct openvpn_vsocket_vtab *
+find_indirect_vtab(struct link_socket *sock)
+{
+    int i, n;
+
+    n = sock->info.plugins->common->n;
+    for (i = 0; i < n; i++)
+    {
+        struct plugin *p = &sock->info.plugins->common->plugins[i];
+        if (p->plugin_type_mask & OPENVPN_PLUGIN_MASK(OPENVPN_PLUGIN_SOCKET_INTERCEPT))
+        {
+            size_t size;
+            struct openvpn_vsocket_vtab *vtab =
+                p->get_vtab ? p->get_vtab(OPENVPN_VTAB_SOCKET_INTERCEPT_SOCKET_V1, &size)
+                : NULL;
+            if (!vtab)
+                continue;
+            ASSERT(size == sizeof(struct openvpn_vsocket_vtab));
+            return vtab;
+        }
+    }
+
+    return NULL;
+}
+
+static void
+create_socket_indirect(struct link_socket *sock, sa_family_t ai_family)
+{
+    const struct openvpn_vsocket_vtab *vtab = find_indirect_vtab(sock);
+    struct addrinfo *cur;
+
+    if (!vtab)
+        msg(M_FATAL, "INDIRECT: Socket bind failed: no provider plugin");
+
+    /* Partially replicates the functionality of socket_bind. No bind_ipv6_only,
+       presently. */
+    if (sock->bind_local) {
+        for (cur = sock->info.lsa->bind_local; cur; cur = cur->ai_next)
+        {
+            if (cur->ai_family == ai_family)
+            {
+                break;
+            }
+        }
+
+        if (!cur)
+        {
+            msg(M_FATAL, "INDIRECT: Socket bind failed: Addr to bind has no %s record",
+                addr_family_name(ai_family));
+        }
+    }
+
+    if (cur)
+        sock->indirect = vtab->bind(cur->ai_addr, cur->ai_addrlen);
+    else
+        sock->indirect = vtab->bind(NULL, 0);
+
+    if (sock->indirect == NULL)
+        msg(M_ERR, "INDIRECT: Socket bind failed");
+}
+#endif  /* ENABLE_PLUGIN */
+
 static void
 create_socket(struct link_socket *sock, struct addrinfo *addr)
 {
+#ifdef ENABLE_PLUGIN
+    if (proto_is_indirect(sock->info.proto))
+    {
+        create_socket_indirect(sock, addr->ai_family);
+    }
+#endif
+
     if (addr->ai_protocol == IPPROTO_UDP || addr->ai_socktype == SOCK_DGRAM)
     {
         sock->sd = create_socket_udp(addr, sock->sockflags);
@@ -2144,7 +2218,12 @@ link_socket_init_phase2(struct link_socket *sock,
         }
 
         /* If socket has not already been created create it now */
-        if (sock->sd == SOCKET_UNDEFINED)
+        if (
+            sock->sd == SOCKET_UNDEFINED
+#ifdef ENABLE_PLUGIN
+            && !sock->indirect
+#endif
+        )
         {
             /* If we have no --remote and have still not figured out the
              * protocol family to use we will use the first of the bind */
@@ -2165,7 +2244,12 @@ link_socket_init_phase2(struct link_socket *sock,
         }
 
         /* Socket still undefined, give a warning and abort connection */
-        if (sock->sd == SOCKET_UNDEFINED)
+        if (
+            sock->sd == SOCKET_UNDEFINED
+#ifdef ENABLE_PLUGIN
+            && !sock->indirect
+#endif
+        )
         {
             msg(M_WARN, "Could not determine IPv4/IPv6 protocol");
             sig_info->signal_received = SIGUSR1;
@@ -2203,7 +2287,8 @@ link_socket_init_phase2(struct link_socket *sock,
         }
     }
 
-    phase2_set_socket_flags(sock);
+    if (sock->sd != SOCKET_UNDEFINED)
+        phase2_set_socket_flags(sock);
     linksock_print_addr(sock);
 
 done:
@@ -2225,6 +2310,14 @@ link_socket_close(struct link_socket *sock)
         const int gremlin = GREMLIN_CONNECTION_FLOOD_LEVEL(sock->gremlin);
 #else
         const int gremlin = 0;
+#endif
+
+#ifdef ENABLE_PLUGIN
+        if (sock->indirect)
+        {
+            sock->indirect->vtab->close(sock->indirect);
+            sock->indirect = NULL;
+        }
 #endif
 
         if (socket_defined(sock->sd))
@@ -3008,6 +3101,9 @@ static const struct proto_names proto_names[] = {
     {"tcp-server", "TCP_SERVER", AF_UNSPEC, PROTO_TCP_SERVER},
     {"tcp-client", "TCP_CLIENT", AF_UNSPEC, PROTO_TCP_CLIENT},
     {"tcp",        "TCP", AF_UNSPEC, PROTO_TCP},
+#ifdef ENABLE_PLUGIN
+    {"indirect", "INDIRECT", AF_UNSPEC, PROTO_INDIRECT},
+#endif
     /* force IPv4 */
     {"udp4",       "UDPv4", AF_INET, PROTO_UDP},
     {"tcp4-server","TCPv4_SERVER", AF_INET, PROTO_TCP_SERVER},
@@ -3019,6 +3115,14 @@ static const struct proto_names proto_names[] = {
     {"tcp6-client","TCPv6_CLIENT", AF_INET6, PROTO_TCP_CLIENT},
     {"tcp6","TCPv6", AF_INET6, PROTO_TCP},
 };
+
+#ifdef ENABLE_PLUGIN
+bool
+proto_is_indirect(int proto)
+{
+    return proto == PROTO_INDIRECT;
+}
+#endif /* ENABLE_PLUGIN */
 
 bool
 proto_is_net(int proto)
@@ -3032,6 +3136,10 @@ proto_is_net(int proto)
 bool
 proto_is_dgram(int proto)
 {
+#ifdef ENABLE_PLUGIN
+    if (proto_is_indirect(proto))
+        return true;
+#endif
     return proto_is_udp(proto);
 }
 
@@ -3225,6 +3333,23 @@ link_socket_read_tcp(struct link_socket *sock,
     }
 }
 
+int link_socket_read_indirect(struct link_socket *sock,
+                              struct buffer *buf,
+                              struct link_socket_actual *from)
+{
+    socklen_t fromlen = sizeof(from->dest.addr);
+    addr_zero_host(&from->dest);
+
+    ASSERT(sock->indirect);
+    buf->len = sock->indirect->vtab->recvfrom(
+        sock->indirect, BPTR(buf), buf_forward_capacity(buf),
+        &from->dest.addr.sa, &fromlen);
+    /* FIXME: do we need the same sort of expectedlen check as in
+       link_socket_read_udp_posix? We probably need to define
+       AF_OPENVPN_INDIRECT anyway, so defer all that. */
+    return buf->len;
+}
+
 #ifndef _WIN32
 
 #if ENABLE_IP_PKTINFO
@@ -3355,6 +3480,17 @@ link_socket_write_tcp(struct link_socket *sock,
 #else
     return link_socket_write_tcp_posix(sock, buf, to);
 #endif
+}
+
+int link_socket_write_indirect(struct link_socket *sock,
+                               struct buffer *buf,
+                               struct link_socket_actual *to)
+{
+    ASSERT(sock->indirect);
+    return sock->indirect->vtab->sendto(
+        sock->indirect, BPTR(buf), BLEN(buf),
+        (struct sockaddr *) &to->dest.addr.sa,
+        (socklen_t) af_addr_size(to->dest.addr.sa.sa_family));
 }
 
 #if ENABLE_IP_PKTINFO
@@ -3792,6 +3928,57 @@ socket_finalize(SOCKET s,
  * Socket event notification
  */
 
+/* TODO: this might be better placed in event.c or similar */
+#ifdef ENABLE_PLUGIN
+
+struct encapsulated_event_set
+{
+    struct openvpn_vsocket_event_set_handle handle;
+    struct event_set *real;
+};
+
+static void
+encapsulated_event_set_set_event(openvpn_vsocket_event_set_handle_t handle,
+                                 openvpn_vsocket_native_event_t ev, unsigned rwflags,
+                                 void *arg)
+{
+    struct event_set *es = ((struct encapsulated_event_set *) handle)->real;
+    if (rwflags == 0)
+        event_del(es, ev);
+    else
+        event_ctl(es, ev, rwflags, arg);
+}
+
+static const struct openvpn_vsocket_event_set_vtab encapsulated_event_set_vtab = {
+    encapsulated_event_set_set_event
+};
+
+unsigned
+socket_do_indirect_pump(openvpn_vsocket_handle_t vsocket,
+                        struct event_set_return *esr, int *esrlen)
+{
+    int i = 0;
+    while (i < *esrlen)
+    {
+        if (vsocket->vtab->update_event(vsocket, esr[i].arg, esr[i].rwflags))
+        {
+            /* Consume the event; move the last one in place of it. */
+            if (i != *esrlen - 1)
+                memcpy(&esr[i], &esr[*esrlen-1], sizeof(struct event_set_return));
+            (*esrlen)--;
+        }
+        else
+        {
+            /* Don't consume the event; move to the next one. */
+            i++;
+        }
+    }
+
+    return vsocket->vtab->pump(vsocket);
+}
+
+#endif  /* ENABLE_PLUGIN */
+
 unsigned int
 socket_set(struct link_socket *s,
            struct event_set *es,
@@ -3817,7 +4004,19 @@ socket_set(struct link_socket *s,
         /* if persistent is defined, call event_ctl only if rwflags has changed since last call */
         if (!persistent || *persistent != rwflags)
         {
-            event_ctl(es, socket_event_handle(s), rwflags, arg);
+#ifdef ENABLE_PLUGIN
+            if (s->indirect)
+            {
+                struct encapsulated_event_set encapsulated_es;
+                encapsulated_es.handle.vtab = &encapsulated_event_set_vtab;
+                encapsulated_es.real = es;
+                s->indirect->vtab->request_event(s->indirect, &encapsulated_es.handle, rwflags);
+            }
+            else
+#endif
+            {
+                event_ctl(es, socket_event_handle(s), rwflags, arg);
+            }
             if (persistent)
             {
                 *persistent = rwflags;
