@@ -248,6 +248,8 @@ obfs_test_recvfrom(openvpn_vsocket_handle_t handle, void *buf, size_t len,
 {
     int fd = ((struct obfs_test_socket *) handle)->fd;
     ssize_t result = recvfrom(fd, buf, len, 0, addr, addrlen);
+    if (result < 0 && errno == EAGAIN)
+        ((struct obfs_test_socket *) handle)->last_rwflags &= ~OPENVPN_VSOCKET_EVENT_READ;
     if (*addrlen > 0)
         munge_addr(addr, *addrlen);
     if (result > 0)
@@ -271,6 +273,8 @@ obfs_test_sendto(openvpn_vsocket_handle_t handle, const void *buf, size_t len,
     munge_addr(addr_rev, addrlen);
     len_munged = munge_buf(buf_munged, buf, len);
     result = sendto(fd, buf_munged, len_munged, 0, addr_rev, addrlen);
+    if (result < 0 && errno == EAGAIN)
+        ((struct obfs_test_socket *) handle)->last_rwflags &= ~OPENVPN_VSOCKET_EVENT_WRITE;
     /* FIXME: Doesn't handle partial transfers. (That might not be an
        issue here anyway?) This is just here to preserve the expected
        invariant of return value <= len. */
